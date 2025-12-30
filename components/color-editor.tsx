@@ -80,117 +80,111 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [historyStep, history, project])
 
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Helper to get coordinates from mouse or touch events
+  const getCoordinates = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
-    if (!canvas) return
-
+    if (!canvas) return null
     const rect = canvas.getBoundingClientRect()
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width)
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height)
+    
+    let clientX, clientY
 
-    const areaId = `area_${Date.now()}`
-    setColors((prev) => ({ ...prev, [areaId]: currentColor }))
+    // Check if it's a touch event
+    if ('touches' in e) {
+       // Preventing default here might be too aggressive for all touch events, 
+       // but for painting we usually want to stop scrolling.
+       // We'll handle preventDefault in the event handlers instead.
+       if (e.touches.length > 0) {
+           clientX = e.touches[0].clientX
+           clientY = e.touches[0].clientY
+       } else {
+           return null
+       }
+    } else {
+       // Mouse event
+       clientX = (e as React.MouseEvent).clientX
+       clientY = (e as React.MouseEvent).clientY
+    }
+
+    return {
+      x: (clientX - rect.left) * (canvas.width / rect.width),
+      y: (clientY - rect.top) * (canvas.height / rect.height)
+    }
   }
 
-  const handlePaint = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !canvasRef.current) return
+  const paint = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const coords = getCoordinates(e)
+    if (!coords || !canvasRef.current) return
 
     const canvas = canvasRef.current
     const ctx = canvas.getContext("2d")
     if (!ctx) return
-
-    const rect = canvas.getBoundingClientRect()
-    const x = (e.clientX - rect.left) * (canvas.width / rect.width)
-    const y = (e.clientY - rect.top) * (canvas.height / rect.height)
 
     ctx.save()
     ctx.globalCompositeOperation = blendMode
     ctx.fillStyle = currentColor
     ctx.globalAlpha = opacity
     ctx.beginPath()
-    ctx.arc(x, y, brushSize, 0, Math.PI * 2)
+    ctx.arc(coords.x, coords.y, brushSize, 0, Math.PI * 2)
     ctx.fill()
-    ctx.restore() // Restaura el modo de mezcla a 'source-over'
+    ctx.restore()
   }
 
-  const saveProject = () => {
-    if (project) {
-      const updated = { ...project, colors }
-      onSave(updated)
-      setSavedMessage(true)
-      setTimeout(() => setSavedMessage(false), 2000)
-    }
+  // Mouse Handlers
+  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if(!eyedropperMode) setIsDrawing(true)
+      if (eyedropperMode) handleEyedropper(e)
+      else paint(e)
   }
 
-  const saveToHistory = () => {
-    if (canvasRef.current) {
-      const canvas = canvasRef.current
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
-      const newHistory = history.slice(0, historyStep + 1)
-      newHistory.push(imageData)
-      setHistory(newHistory)
-      setHistoryStep(newHistory.length - 1)
-    }
+  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!isDrawing && !eyedropperMode) return
+      if (eyedropperMode) return // Optional preview for eyedropper?
+      paint(e)
   }
 
-  const undo = () => {
-    if (historyStep > 0 && canvasRef.current) {
-      const canvas = canvasRef.current
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-
-      setHistoryStep(historyStep - 1)
-      ctx.putImageData(history[historyStep - 1], 0, 0)
-    }
+  const handleMouseUp = () => {
+      setIsDrawing(false)
+      if (!eyedropperMode) saveToHistory()
   }
 
-  const redo = () => {
-    if (historyStep < history.length - 1 && canvasRef.current) {
-      const canvas = canvasRef.current
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-
-      setHistoryStep(historyStep + 1)
-      ctx.putImageData(history[historyStep + 1], 0, 0)
-    }
+  // Touch Handlers
+  const handleTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
+      // e.preventDefault() // Often necessary to prevent scrolling, but add passive:false logic if strictly needed
+      // React synthetic events already wrap this.
+      if(!eyedropperMode) setIsDrawing(true)
+      if (eyedropperMode) handleEyedropper(e) 
+      else paint(e)
   }
 
-  const handleEyedropper = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleTouchMove = (e: React.TouchEvent<HTMLCanvasElement>) => {
+      // Prevent scrolling while painting
+      // Note: In React 18+ strict mode, this might warn if not passive, but for canvas drawing it's standard 
+      // to stop scroll. 
+      // However, sometimes better to handle it with CSS touch-action: none
+      if (!isDrawing && !eyedropperMode) return
+      paint(e)
+  }
+
+  const handleTouchEnd = () => {
+      setIsDrawing(false)
+      if (!eyedropperMode) saveToHistory()
+  }
+
+  // Eyedropper needs to handle touch too if we want it mobile compatible
+  const handleEyedropper = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
     if (!eyedropperMode || !canvasRef.current) return
 
     const canvas = canvasRef.current
     const ctx = canvas.getContext("2d")
     if (!ctx) return
 
-    const rect = canvas.getBoundingClientRect()
-    const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width))
-    const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height))
+    const coords = getCoordinates(e)
+    if(!coords) return
 
-    const pixel = ctx.getImageData(x, y, 1, 1).data
+    const pixel = ctx.getImageData(coords.x, coords.y, 1, 1).data
     const hex = `#${((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1)}`
     setCurrentColor(hex)
     setEyedropperMode(false)
-  }
-
-  const undoLastChange = () => {
-    if (canvasRef.current && project?.image) {
-      const canvas = canvasRef.current
-      const ctx = canvas.getContext("2d")
-      if (!ctx) return
-
-      const img = new Image()
-      img.crossOrigin = "anonymous"
-      img.onload = () => {
-        canvas.width = img.width
-        canvas.height = img.height
-        ctx.drawImage(img, 0, 0)
-        saveToHistory()
-      }
-      img.src = project.image
-    }
   }
 
   if (!project) return null
@@ -219,24 +213,25 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
         <div className="flex-1 flex items-center justify-center bg-muted rounded-lg overflow-hidden min-h-96 relative">
           <canvas
             ref={canvasRef}
-            onClick={(e) => {
-              if (eyedropperMode) {
-                handleEyedropper(e)
-              } else {
-                handleCanvasClick(e)
-              }
-            }}
-            onMouseDown={() => !eyedropperMode && setIsDrawing(true)}
-            onMouseUp={() => {
-                setIsDrawing(false)
-                if(!eyedropperMode) saveToHistory()
-            }}
-            onMouseMove={handlePaint}
-            onMouseLeave={() => setIsDrawing(false)}
-            className={`max-w-full max-h-full object-contain ${
+            
+            // Mouse Events
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+
+            // Touch Events
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+
+            className={`max-w-full max-h-full object-contain touch-none ${
               eyedropperMode ? "cursor-crosshair" : "cursor-crosshair"
             }`}
+             style={{ touchAction: 'none' }} // Critical for preventing scroll on mobile
           />
+
         </div>
 
         {/* Control Panel */}
