@@ -187,6 +187,72 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
     setEyedropperMode(false)
   }
 
+  const saveToHistory = () => {
+    if (!canvasRef.current) return
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+    const newHistory = history.slice(0, historyStep + 1)
+    newHistory.push(imageData)
+    setHistory(newHistory)
+    setHistoryStep(newHistory.length - 1)
+  }
+
+  const undo = () => {
+    if (historyStep <= 0 || !canvasRef.current) return
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const newStep = historyStep - 1
+    setHistoryStep(newStep)
+    ctx.putImageData(history[newStep], 0, 0)
+  }
+
+  const redo = () => {
+    if (historyStep >= history.length - 1 || !canvasRef.current) return
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const newStep = historyStep + 1
+    setHistoryStep(newStep)
+    ctx.putImageData(history[newStep], 0, 0)
+  }
+
+  const saveProject = () => {
+    if (!project || !canvasRef.current) return
+    const canvas = canvasRef.current
+    const updatedProject = {
+      ...project,
+      image: canvas.toDataURL("image/png"),
+      colors,
+    }
+    onSave(updatedProject)
+    setSavedMessage(true)
+    setTimeout(() => setSavedMessage(false), 2000)
+  }
+
+  const undoLastChange = () => {
+    if (!canvasRef.current || !project?.image) return
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      ctx.drawImage(img, 0, 0)
+      setHistory([])
+      setHistoryStep(-1)
+      saveToHistory()
+    }
+    img.src = project.image
+  }
+
   if (!project) return null
 
   return (
