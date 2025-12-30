@@ -3,11 +3,13 @@
 import type React from "react"
 
 import { useRef, useState, useEffect } from "react"
-import { ChevronLeft, Download, Eye } from "lucide-react"
+import { ChevronLeft, Download, Eye, Undo2, Redo2, Pipette } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ExportDialog } from "./export-dialog"
+import { carColorPalettes } from "@/lib/color-palettes"
 import type { Project } from "./project-manager"
 
 interface ColorEditorProps {
@@ -24,6 +26,9 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
   const [colors, setColors] = useState<Record<string, string>>({})
   const [savedMessage, setSavedMessage] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [history, setHistory] = useState<ImageData[]>([])
+  const [historyStep, setHistoryStep] = useState(-1)
+  const [eyedropperMode, setEyedropperMode] = useState(false)
 
   useEffect(() => {
     if (project?.colors) {
@@ -43,10 +48,32 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
         canvas.width = img.width
         canvas.height = img.height
         ctx.drawImage(img, 0, 0)
+        saveToHistory()
       }
       img.src = project.image
     }
   }, [project?.image])
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === "z" && !e.shiftKey) {
+          e.preventDefault()
+          undo()
+        } else if (e.key === "y" || (e.key === "z" && e.shiftKey)) {
+          e.preventDefault()
+          redo()
+        } else if (e.key === "s") {
+          e.preventDefault()
+          saveProject()
+        }
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown)
+    return () => window.removeEventListener("keydown", handleKeyDown)
+  }, [historyStep, history, project])
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current
@@ -87,6 +114,59 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
     }
   }
 
+  const saveToHistory = () => {
+    if (canvasRef.current) {
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
+
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+      const newHistory = history.slice(0, historyStep + 1)
+      newHistory.push(imageData)
+      setHistory(newHistory)
+      setHistoryStep(newHistory.length - 1)
+    }
+  }
+
+  const undo = () => {
+    if (historyStep > 0 && canvasRef.current) {
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
+
+      setHistoryStep(historyStep - 1)
+      ctx.putImageData(history[historyStep - 1], 0, 0)
+    }
+  }
+
+  const redo = () => {
+    if (historyStep < history.length - 1 && canvasRef.current) {
+      const canvas = canvasRef.current
+      const ctx = canvas.getContext("2d")
+      if (!ctx) return
+
+      setHistoryStep(historyStep + 1)
+      ctx.putImageData(history[historyStep + 1], 0, 0)
+    }
+  }
+
+  const handleEyedropper = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!eyedropperMode || !canvasRef.current) return
+
+    const canvas = canvasRef.current
+    const ctx = canvas.getContext("2d")
+    if (!ctx) return
+
+    const rect = canvas.getBoundingClientRect()
+    const x = Math.floor((e.clientX - rect.left) * (canvas.width / rect.width))
+    const y = Math.floor((e.clientY - rect.top) * (canvas.height / rect.height))
+
+    const pixel = ctx.getImageData(x, y, 1, 1).data
+    const hex = `#${((1 << 24) + (pixel[0] << 16) + (pixel[1] << 8) + pixel[2]).toString(16).slice(1)}`
+    setCurrentColor(hex)
+    setEyedropperMode(false)
+  }
+
   const undoLastChange = () => {
     if (canvasRef.current && project?.image) {
       const canvas = canvasRef.current
@@ -99,6 +179,7 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
         canvas.width = img.width
         canvas.height = img.height
         ctx.drawImage(img, 0, 0)
+        saveToHistory()
       }
       img.src = project.image
     }
@@ -130,12 +211,20 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
         <div className="flex-1 flex items-center justify-center bg-muted rounded-lg overflow-hidden min-h-96">
           <canvas
             ref={canvasRef}
-            onClick={handleCanvasClick}
-            onMouseDown={() => setIsDrawing(true)}
+            onClick={(e) => {
+              if (eyedropperMode) {
+                handleEyedropper(e)
+              } else {
+                handleCanvasClick(e)
+              }
+            }}
+            onMouseDown={() => !eyedropperMode && setIsDrawing(true)}
             onMouseUp={() => setIsDrawing(false)}
             onMouseMove={handlePaint}
             onMouseLeave={() => setIsDrawing(false)}
-            className="max-w-full max-h-full object-contain cursor-crosshair"
+            className={`max-w-full max-h-full object-contain ${
+              eyedropperMode ? "cursor-crosshair" : "cursor-crosshair"
+            }`}
           />
         </div>
 
@@ -144,7 +233,7 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
           {/* Color Picker */}
           <Card className="bg-card border border-border p-4">
             <h3 className="text-sm font-semibold mb-3 text-foreground">Color Actual</h3>
-            <div className="flex gap-3 items-center">
+            <div className="flex gap-3 items-center mb-3">
               <input
                 type="color"
                 value={currentColor}
@@ -160,6 +249,42 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
                 />
               </div>
             </div>
+            <Button
+              onClick={() => setEyedropperMode(!eyedropperMode)}
+              variant={eyedropperMode ? "default" : "outline"}
+              size="sm"
+              className="w-full"
+            >
+              <Pipette className="w-4 h-4 mr-2" />
+              {eyedropperMode ? "Modo Selector Activo" : "Selector de Color"}
+            </Button>
+          </Card>
+
+          {/* Color Palettes */}
+          <Card className="bg-card border border-border p-4">
+            <h3 className="text-sm font-semibold mb-3 text-foreground">Paletas de Colores</h3>
+            <Tabs defaultValue="classic" className="w-full">
+              <TabsList className="grid w-full grid-cols-3 mb-3">
+                <TabsTrigger value="classic" className="text-xs">Clásicos</TabsTrigger>
+                <TabsTrigger value="metallic" className="text-xs">Metálicos</TabsTrigger>
+                <TabsTrigger value="vibrant" className="text-xs">Vibrantes</TabsTrigger>
+              </TabsList>
+              {Object.entries(carColorPalettes).slice(0, 3).map(([key, palette]) => (
+                <TabsContent key={key} value={key} className="mt-0">
+                  <div className="grid grid-cols-5 gap-2">
+                    {palette.colors.map((color) => (
+                      <button
+                        key={color.hex}
+                        onClick={() => setCurrentColor(color.hex)}
+                        className="w-full aspect-square rounded-md border-2 border-border hover:border-primary transition-colors"
+                        style={{ backgroundColor: color.hex }}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
+                </TabsContent>
+              ))}
+            </Tabs>
           </Card>
 
           {/* Brush Settings */}
@@ -192,6 +317,28 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
 
           {/* Action Buttons */}
           <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <Button
+                onClick={undo}
+                disabled={historyStep <= 0}
+                variant="outline"
+                size="sm"
+                className="flex-1 bg-transparent"
+                title="Deshacer (Ctrl+Z)"
+              >
+                <Undo2 className="w-4 h-4" />
+              </Button>
+              <Button
+                onClick={redo}
+                disabled={historyStep >= history.length - 1}
+                variant="outline"
+                size="sm"
+                className="flex-1 bg-transparent"
+                title="Rehacer (Ctrl+Y)"
+              >
+                <Redo2 className="w-4 h-4" />
+              </Button>
+            </div>
             <Button
               onClick={saveProject}
               className="w-full bg-primary hover:bg-primary/90 text-primary-foreground"
@@ -204,7 +351,7 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
               Exportar
             </Button>
             <Button onClick={undoLastChange} variant="outline" className="w-full bg-transparent">
-              Deshacer
+              Resetear Imagen
             </Button>
           </div>
         </div>

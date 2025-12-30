@@ -11,7 +11,7 @@ interface ExportDialogProps {
   isOpen: boolean
   onClose: () => void
   projectName: string
-  canvasRef: React.RefObject<HTMLCanvasElement>
+  canvasRef: React.RefObject<HTMLCanvasElement | null>
 }
 
 export function ExportDialog({ isOpen, onClose, projectName, canvasRef }: ExportDialogProps) {

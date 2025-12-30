@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Plus, Folder, Trash2, Download } from "lucide-react"
+import { Plus, Folder, Trash2, Download, Copy } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
+import { ThemeToggle } from "@/components/theme-toggle"
+import { ConfirmDialog } from "@/components/confirm-dialog"
 
 export interface Project {
   id: string
@@ -22,6 +24,10 @@ export function ProjectManager({ onSelectProject, onNewProject }: ProjectManager
   const [projects, setProjects] = useState<Project[]>([])
   const [newName, setNewName] = useState("")
   const [loading, setLoading] = useState(true)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; projectId: string | null }>({
+    open: false,
+    projectId: null,
+  })
 
   useEffect(() => {
     const saved = localStorage.getItem("carColorProjects")
@@ -43,6 +49,17 @@ export function ProjectManager({ onSelectProject, onNewProject }: ProjectManager
 
   const deleteProject = (id: string) => {
     setProjects(projects.filter((p) => p.id !== id))
+    setDeleteConfirm({ open: false, projectId: null })
+  }
+
+  const duplicateProject = (project: Project) => {
+    const duplicated: Project = {
+      ...project,
+      id: `project_${Date.now()}`,
+      name: `${project.name} (Copia)`,
+      timestamp: Date.now(),
+    }
+    setProjects([duplicated, ...projects])
   }
 
   const renameProject = (id: string, newName: string) => {
@@ -76,14 +93,17 @@ export function ProjectManager({ onSelectProject, onNewProject }: ProjectManager
       <div className="max-w-6xl mx-auto">
         {/* Header */}
         <div className="flex flex-col gap-2 mb-8">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
-              <Folder className="w-6 h-6 text-primary-foreground" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 bg-primary rounded-lg flex items-center justify-center">
+                <Folder className="w-6 h-6 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-foreground">ColorWheel</h1>
+                <p className="text-sm text-muted-foreground">Personaliza los colores de tu auto</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">ColorWheel</h1>
-              <p className="text-sm text-muted-foreground">Personaliza los colores de tu auto</p>
-            </div>
+            <ThemeToggle />
           </div>
         </div>
 
@@ -139,6 +159,16 @@ export function ProjectManager({ onSelectProject, onNewProject }: ProjectManager
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
+                        duplicateProject(project)
+                      }}
+                      className="p-2 hover:bg-muted rounded-md transition-colors"
+                      title="Duplicar proyecto"
+                    >
+                      <Copy className="w-4 h-4 text-muted-foreground hover:text-foreground" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
                         exportProject(project)
                       }}
                       className="p-2 hover:bg-muted rounded-md transition-colors"
@@ -149,7 +179,7 @@ export function ProjectManager({ onSelectProject, onNewProject }: ProjectManager
                     <button
                       onClick={(e) => {
                         e.stopPropagation()
-                        deleteProject(project.id)
+                        setDeleteConfirm({ open: true, projectId: project.id })
                       }}
                       className="p-2 hover:bg-red-500/10 rounded-md transition-colors"
                       title="Eliminar proyecto"
@@ -163,6 +193,17 @@ export function ProjectManager({ onSelectProject, onNewProject }: ProjectManager
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={deleteConfirm.open}
+        onOpenChange={(open) => setDeleteConfirm({ open, projectId: null })}
+        onConfirm={() => deleteConfirm.projectId && deleteProject(deleteConfirm.projectId)}
+        title="¿Eliminar proyecto?"
+        description="Esta acción no se puede deshacer. El proyecto será eliminado permanentemente."
+        confirmText="Eliminar"
+        cancelText="Cancelar"
+        variant="destructive"
+      />
     </div>
   )
 }
