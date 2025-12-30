@@ -3,11 +3,12 @@
 import type React from "react"
 
 import { useRef, useState, useEffect } from "react"
-import { ChevronLeft, Download, Eye, Undo2, Redo2, Pipette } from "lucide-react"
+import { ChevronLeft, Download, Eye, Undo2, Redo2, Pipette, Layers } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ExportDialog } from "./export-dialog"
 import { carColorPalettes } from "@/lib/color-palettes"
 import type { Project } from "./project-manager"
@@ -17,6 +18,8 @@ interface ColorEditorProps {
   onSave: (project: Project) => void
   onBack: () => void
 }
+
+type BlendMode = GlobalCompositeOperation
 
 export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -29,6 +32,8 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
   const [history, setHistory] = useState<ImageData[]>([])
   const [historyStep, setHistoryStep] = useState(-1)
   const [eyedropperMode, setEyedropperMode] = useState(false)
+  const [blendMode, setBlendMode] = useState<BlendMode>("color")
+  const [opacity, setOpacity] = useState(0.6)
 
   useEffect(() => {
     if (project?.colors) {
@@ -98,11 +103,14 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
     const x = (e.clientX - rect.left) * (canvas.width / rect.width)
     const y = (e.clientY - rect.top) * (canvas.height / rect.height)
 
+    ctx.save()
+    ctx.globalCompositeOperation = blendMode
     ctx.fillStyle = currentColor
-    ctx.globalAlpha = 0.6
+    ctx.globalAlpha = opacity
     ctx.beginPath()
     ctx.arc(x, y, brushSize, 0, Math.PI * 2)
     ctx.fill()
+    ctx.restore() // Restaura el modo de mezcla a 'source-over'
   }
 
   const saveProject = () => {
@@ -208,7 +216,7 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
       {/* Main Content */}
       <div className="flex-1 flex flex-col md:flex-row gap-4 p-4 max-w-6xl mx-auto w-full">
         {/* Canvas Area */}
-        <div className="flex-1 flex items-center justify-center bg-muted rounded-lg overflow-hidden min-h-96">
+        <div className="flex-1 flex items-center justify-center bg-muted rounded-lg overflow-hidden min-h-96 relative">
           <canvas
             ref={canvasRef}
             onClick={(e) => {
@@ -219,7 +227,10 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
               }
             }}
             onMouseDown={() => !eyedropperMode && setIsDrawing(true)}
-            onMouseUp={() => setIsDrawing(false)}
+            onMouseUp={() => {
+                setIsDrawing(false)
+                if(!eyedropperMode) saveToHistory()
+            }}
             onMouseMove={handlePaint}
             onMouseLeave={() => setIsDrawing(false)}
             className={`max-w-full max-h-full object-contain ${
@@ -230,6 +241,48 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
 
         {/* Control Panel */}
         <div className="w-full md:w-80 flex flex-col gap-4">
+          
+          {/* Blend Options */}
+          <Card className="bg-card border border-border p-4">
+            <h3 className="text-sm font-semibold mb-3 text-foreground flex items-center gap-2">
+                <Layers className="w-4 h-4"/>
+                Opciones de Mezcla
+            </h3>
+            <div className="space-y-3">
+                <div className="space-y-1">
+                    <label className="text-xs text-muted-foreground">Modo de Fusión</label>
+                    <Select value={blendMode} onValueChange={(v) => setBlendMode(v as BlendMode)}>
+                        <SelectTrigger>
+                            <SelectValue placeholder="Selecciona modo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="color">Color (Realista)</SelectItem>
+                            <SelectItem value="overlay">Superponer (Contraste)</SelectItem>
+                            <SelectItem value="multiply">Multiplicar (Oscurecer)</SelectItem>
+                            <SelectItem value="source-over">Normal (Plano)</SelectItem>
+                            <SelectItem value="screen">Pantalla (Aclarar)</SelectItem>
+                            <SelectItem value="hue">Solo Matiz</SelectItem>
+                        </SelectContent>
+                    </Select>
+                </div>
+                <div className="space-y-1">
+                     <div className="flex justify-between">
+                        <label className="text-xs text-muted-foreground">Opacidad</label>
+                        <span className="text-xs text-muted-foreground">{Math.round(opacity * 100)}%</span>
+                     </div>
+                     <input
+                      type="range"
+                      min="0.1"
+                      max="1"
+                      step="0.05"
+                      value={opacity}
+                      onChange={(e) => setOpacity(Number(e.target.value))}
+                      className="w-full"
+                    />
+                </div>
+            </div>
+          </Card>
+
           {/* Color Picker */}
           <Card className="bg-card border border-border p-4">
             <h3 className="text-sm font-semibold mb-3 text-foreground">Color Actual</h3>
@@ -299,20 +352,6 @@ export function ColorEditor({ project, onSave, onBack }: ColorEditorProps) {
               className="w-full"
             />
             <p className="text-xs text-muted-foreground mt-2">{brushSize}px</p>
-          </Card>
-
-          {/* Instructions */}
-          <Card className="bg-card border border-border p-4">
-            <h3 className="text-sm font-semibold mb-2 text-foreground flex items-center gap-2">
-              <Eye className="w-4 h-4" />
-              Cómo usar
-            </h3>
-            <ul className="text-xs text-muted-foreground space-y-1">
-              <li>• Selecciona un color con el picker</li>
-              <li>• Haz clic o arrastra para pintar</li>
-              <li>• Ajusta el tamaño según necesites</li>
-              <li>• Guarda tu proyecto</li>
-            </ul>
           </Card>
 
           {/* Action Buttons */}
